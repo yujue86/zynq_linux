@@ -1639,6 +1639,8 @@ static int sdhci_check_ro(struct sdhci_host *host)
 		is_readonly = 0;
 	else if (host->ops->get_ro)
 		is_readonly = host->ops->get_ro(host);
+	else if (host->quirks2 & SDHCI_QUIRK2_BROKEN_WRITE_PROTECT)
+		is_readonly = 0;
 	else
 		is_readonly = !(sdhci_readl(host, SDHCI_PRESENT_STATE)
 				& SDHCI_WRITE_PROTECT);

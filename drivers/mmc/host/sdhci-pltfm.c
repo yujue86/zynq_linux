@@ -80,7 +80,9 @@ void sdhci_get_of_property(struct platform_device *pdev)
 		    bus_width == 1))
 			host->quirks |= SDHCI_QUIRK_FORCE_1_BIT_DATA;
 
-		if (sdhci_of_wp_inverted(np))
+		if (of_get_property(np, "sdhci,wp-broken", NULL))
+			host->quirks2 |= SDHCI_QUIRK2_BROKEN_WRITE_PROTECT;
+		else if (sdhci_of_wp_inverted(np))
 			host->quirks |= SDHCI_QUIRK_INVERTED_WRITE_PROTECT;
 
 		if (of_get_property(np, "broken-cd", NULL))
