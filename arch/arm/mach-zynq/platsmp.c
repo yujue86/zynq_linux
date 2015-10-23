@@ -27,6 +27,9 @@
 #include <linux/irqchip/arm-gic.h>
 #include "common.h"
 
+// The address of the WFE loop to send CPU1 back to so it run a bare-metal app
+#define BARE_METAL_STARTUP 0xFFFFFF2C
+
 /*
  * Store number of cores in the system
  * Because of scu_get_core_count() must be in __init section and can't
@@ -95,7 +98,12 @@ EXPORT_SYMBOL(zynq_cpun_start);
 static int zynq_boot_secondary(unsigned int cpu,
 						struct task_struct *idle)
 {
-	return zynq_cpun_start(virt_to_phys(zynq_secondary_startup), cpu);
+    // Start cpu1 up as a bare metal application (embedded)
+    if (cpu == 1) {
+        return zynq_cpun_start(BARE_METAL_STARTUP, cpu);
+    } else {
+        return zynq_cpun_start(virt_to_phys(zynq_secondary_startup), cpu);
+    }
 }
 
 /*
