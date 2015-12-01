@@ -73,6 +73,7 @@ struct xilinx_dma_config {
 	int coalesc;			/* Interrupt coalescing threshold */
 	int delay;			/* Delay counter */
 	int reset;			/* Reset Channel */
+    bool cyclic_bd;     /* Cyclic buffer descriptors enabled */
 };
 
 /* Device configuration structure for CDMA */

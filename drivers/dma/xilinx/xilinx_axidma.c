@@ -59,6 +59,8 @@
 #define XILINX_DMA_XR_DELAY_MASK	0xFF000000 /* Delay timeout counter */
 #define XILINX_DMA_XR_COALESCE_MASK	0x00FF0000 /* Coalesce counter */
 
+#define XILINX_DMA_XR_CYCLIC_BD_MASK 0x00000010 /* Enable cyclic buffer desc */
+
 #define XILINX_DMA_DELAY_SHIFT		24 /* Delay timeout counter shift */
 #define XILINX_DMA_COALESCE_SHIFT	16 /* Coalesce counter shift */
 
@@ -408,8 +410,13 @@ static void xilinx_dma_start_transfer(struct xilinx_dma_chan *chan)
 			  dma_read(chan, XILINX_DMA_CONTROL_OFFSET) |
 			  XILINX_DMA_XR_IRQ_ALL_MASK);
 
-		/* Update tail ptr register and start the transfer */
-		dma_write(chan, XILINX_DMA_TDESC_OFFSET, desct->async_tx.phys);
+        /* If we're in cyclic mode, we update the tail pointer register to be an
+         * address not in the BD cycle chain. Otherwise, it's the last BD. */
+        if (chan->config.cyclic_bd) {
+            dma_write(chan, XILINX_DMA_TDESC_OFFSET, (u32)NULL);
+        } else  {
+            dma_write(chan, XILINX_DMA_TDESC_OFFSET, desct->async_tx.phys);
+        }
 		goto out_unlock;
 	}
 
@@ -536,8 +543,6 @@ static int dma_reset(struct xilinx_dma_chan *chan)
 static irqreturn_t dma_intr_handler(int irq, void *data)
 {
 	struct xilinx_dma_chan *chan = data;
-	int update_cookie = 0;
-	int to_transfer = 0;
 	u32 stat, reg;
 
 	reg = dma_read(chan, XILINX_DMA_CONTROL_OFFSET);
@@ -547,8 +552,9 @@ static irqreturn_t dma_intr_handler(int irq, void *data)
 		  reg & ~XILINX_DMA_XR_IRQ_ALL_MASK);
 
 	stat = dma_read(chan, XILINX_DMA_STATUS_OFFSET);
-	if (!(stat & XILINX_DMA_XR_IRQ_ALL_MASK))
-		return IRQ_NONE;
+	if (!(stat & XILINX_DMA_XR_IRQ_ALL_MASK)) {
+        return IRQ_NONE;
+    }
 
 	/* Ack the interrupts */
 	dma_write(chan, XILINX_DMA_STATUS_OFFSET,
@@ -574,19 +580,15 @@ static irqreturn_t dma_intr_handler(int irq, void *data)
 	if (stat & XILINX_DMA_XR_IRQ_DELAY_MASK)
 		dev_dbg(chan->dev, "Inter-packet latency too long\n");
 
-	if (stat & XILINX_DMA_XR_IRQ_IOC_MASK) {
-		update_cookie = 1;
-		to_transfer = 1;
+    /* If we're not in cyclic mode, then the transfer is complete, so
+     * schedule the cleanup & callback, and move onto the next transfers. */
+	if ((stat & XILINX_DMA_XR_IRQ_IOC_MASK) && !chan->config.cyclic_bd) {
+		xilinx_dma_update_completed_cookie(chan);
+		chan->start_transfer(chan);
+        tasklet_schedule(&chan->tasklet);
 	}
 
-	if (update_cookie)
-		xilinx_dma_update_completed_cookie(chan);
-
-	if (to_transfer)
-		chan->start_transfer(chan);
-
-	tasklet_schedule(&chan->tasklet);
-	return IRQ_HANDLED;
+    return IRQ_HANDLED;
 }
 
 static void dma_do_tasklet(unsigned long data)
@@ -876,6 +878,14 @@ static int xilinx_dma_device_control(struct dma_chan *dchan,
 			reg |= cfg->delay << XILINX_DMA_DELAY_SHIFT;
 			chan->config.delay = cfg->delay;
 		}
+
+        // The user wants to use cyclic buffer descriptors
+        if (cfg->cyclic_bd) {
+            reg |= XILINX_DMA_XR_CYCLIC_BD_MASK;
+        } else {
+            reg &= ~XILINX_DMA_XR_CYCLIC_BD_MASK;
+        }
+        chan->config.cyclic_bd = cfg->cyclic_bd;
 
 		dma_write(chan, XILINX_DMA_CONTROL_OFFSET, reg);
 
